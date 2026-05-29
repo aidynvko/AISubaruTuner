@@ -15,6 +15,8 @@ from .subaru_rom_parser import SubaruROMParser
 from .tuning_engine_updated import TuningEngine
 
 logger = logging.getLogger(__name__)
+KNOWN_ROM_ID_OFFSETS = [0x2000, 0x2010, 0x2020]
+ROM_ID_SEARCH_WINDOW_SIZE = 0x3000
 
 
 class ROMIntegrationManager:
@@ -26,6 +28,15 @@ class ROMIntegrationManager:
         self.tuning_engine = TuningEngine()
         self.cache = {}
         self.bundled_definition_map = self._build_bundled_definition_map()
+        self.known_bundled_ids = list(self.bundled_definition_map.keys())
+        self.known_bundled_id_bytes = {
+            rom_id: rom_id.encode("ascii") for rom_id in self.known_bundled_ids
+        }
+        self.max_bundled_id_len = (
+            max(len(rom_id) for rom_id in self.known_bundled_ids)
+            if self.known_bundled_ids
+            else 0
+        )
 
     def analyze_rom_package(
         self, datalog_path: str, tune_path: str, definition_path: Optional[str] = None
@@ -115,7 +126,7 @@ class ROMIntegrationManager:
     ) -> Dict[str, Any]:
         """Parse ROM file with optional XML definitions"""
         try:
-            self.rom_parser.table_definitions = None
+            self.rom_parser.clear_table_definitions()
             if table_definitions:
                 self.rom_parser.set_table_definitions(table_definitions)
 
@@ -134,7 +145,7 @@ class ROMIntegrationManager:
             raise ValueError(f"Failed to parse ROM file: {e}")
 
     def _build_bundled_definition_map(self) -> Dict[str, str]:
-        base = Path(__file__).resolve().parents[1] / "test_files" / "merpmod"
+        base = Path(__file__).resolve().parent / "definitions" / "merpmod"
         definitions = {"A8DK100F": base / "A8DK100F.xml"}
         return {
             rom_id: str(path)
@@ -161,11 +172,21 @@ class ROMIntegrationManager:
     def _detect_known_rom_id(self, tune_path: str) -> Optional[str]:
         if not self.bundled_definition_map:
             return None
+
         with open(tune_path, "rb") as rom_file:
-            rom_data = rom_file.read()
-        for rom_id in self.bundled_definition_map.keys():
-            if rom_id.encode("ascii") in rom_data:
-                return rom_id
+            for offset in KNOWN_ROM_ID_OFFSETS:
+                rom_file.seek(offset)
+                chunk = rom_file.read(self.max_bundled_id_len)
+                chunk_text = chunk.decode("ascii", errors="replace")
+                for rom_id in self.known_bundled_ids:
+                    if rom_id in chunk_text:
+                        return rom_id
+
+            rom_file.seek(0)
+            prefix = rom_file.read(ROM_ID_SEARCH_WINDOW_SIZE)
+            for rom_id, rom_id_bytes in self.known_bundled_id_bytes.items():
+                if rom_id_bytes in prefix:
+                    return rom_id
         return None
 
     def _analyze_datalog(self, datalog_path: str) -> Dict[str, Any]:

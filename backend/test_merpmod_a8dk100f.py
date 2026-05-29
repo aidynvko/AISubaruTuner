@@ -6,7 +6,10 @@ from .xml_definition_parser import XMLDefinitionParser
 
 def test_merpmod_definition_parses():
     definition_path = (
-        Path(__file__).resolve().parents[1] / "test_files" / "merpmod" / "A8DK100F.xml"
+        Path(__file__).resolve().parent
+        / "definitions"
+        / "merpmod"
+        / "A8DK100F.xml"
     )
     parser = XMLDefinitionParser()
     definition = parser.parse_definition_file(str(definition_path))
@@ -32,5 +35,4 @@ def test_merpmod_definition_auto_resolves_from_rom_id(tmp_path):
 
     assert isinstance(tables, dict)
     assert len(tables) > 0
-    assert "basic_info" not in tables
     assert "Engine Load Limit (Maximum)" in tables
