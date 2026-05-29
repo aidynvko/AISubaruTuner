@@ -173,20 +173,22 @@ class ROMIntegrationManager:
         if not self.bundled_definition_map:
             return None
 
-        with open(tune_path, "rb") as rom_file:
-            for offset in KNOWN_ROM_ID_OFFSETS:
-                rom_file.seek(offset)
-                chunk = rom_file.read(self.max_bundled_id_len)
-                chunk_text = chunk.decode("ascii", errors="replace")
-                for rom_id in self.known_bundled_ids:
-                    if rom_id in chunk_text:
-                        return rom_id
+        try:
+            with open(tune_path, "rb") as rom_file:
+                for offset in KNOWN_ROM_ID_OFFSETS:
+                    rom_file.seek(offset)
+                    chunk = rom_file.read(self.max_bundled_id_len)
+                    for rom_id, rom_id_bytes in self.known_bundled_id_bytes.items():
+                        if rom_id_bytes in chunk:
+                            return rom_id
 
-            rom_file.seek(0)
-            prefix = rom_file.read(ROM_ID_SEARCH_WINDOW_SIZE)
-            for rom_id, rom_id_bytes in self.known_bundled_id_bytes.items():
-                if rom_id_bytes in prefix:
-                    return rom_id
+                rom_file.seek(0)
+                prefix = rom_file.read(ROM_ID_SEARCH_WINDOW_SIZE)
+                for rom_id, rom_id_bytes in self.known_bundled_id_bytes.items():
+                    if rom_id_bytes in prefix:
+                        return rom_id
+        except OSError as exc:
+            logger.warning(f"Failed to read ROM file for ID detection ({tune_path}): {exc}")
         return None
 
     def _analyze_datalog(self, datalog_path: str) -> Dict[str, Any]:

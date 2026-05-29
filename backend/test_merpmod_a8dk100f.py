@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .rom_integration import ROMIntegrationManager
+from .rom_integration import KNOWN_ROM_ID_OFFSETS, ROMIntegrationManager
 from .xml_definition_parser import XMLDefinitionParser
 
 
@@ -27,7 +27,8 @@ def test_merpmod_definition_auto_resolves_from_rom_id(tmp_path):
     )
     patched_rom = tmp_path / "A8DK100F_Original.bin"
     data = bytearray(source_rom.read_bytes())
-    data[0x2000 : 0x2008] = b"A8DK100F"
+    id_offset = KNOWN_ROM_ID_OFFSETS[0]
+    data[id_offset : id_offset + 8] = b"A8DK100F"
     patched_rom.write_bytes(data)
 
     manager = ROMIntegrationManager()
