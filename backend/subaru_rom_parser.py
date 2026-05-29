@@ -29,6 +29,10 @@ class SubaruROMParser:
         self.table_definitions = definitions
         logger.info(f"Loaded {definitions['table_count']} table definitions")
 
+    def clear_table_definitions(self):
+        """Clear XML table definitions from parser state"""
+        self.table_definitions = None
+
     def parse_rom(self, rom_path: str) -> Dict[str, Any]:
         """Parse ROM file using XML definitions"""
         try:

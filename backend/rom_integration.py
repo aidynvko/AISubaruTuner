@@ -15,6 +15,8 @@ from .subaru_rom_parser import SubaruROMParser
 from .tuning_engine_updated import TuningEngine
 
 logger = logging.getLogger(__name__)
+KNOWN_ROM_ID_OFFSETS = [0x2000, 0x2010, 0x2020]
+ROM_ID_SEARCH_WINDOW_SIZE = 0x3000
 
 
 class ROMIntegrationManager:
@@ -25,6 +27,16 @@ class ROMIntegrationManager:
         self.rom_parser = SubaruROMParser()
         self.tuning_engine = TuningEngine()
         self.cache = {}
+        self.bundled_definition_map = self._build_bundled_definition_map()
+        self.known_bundled_ids = list(self.bundled_definition_map.keys())
+        self.known_bundled_id_bytes = {
+            rom_id: rom_id.encode("ascii") for rom_id in self.known_bundled_ids
+        }
+        self.max_bundled_id_len = (
+            max(len(rom_id) for rom_id in self.known_bundled_ids)
+            if self.known_bundled_ids
+            else 0
+        )
 
     def analyze_rom_package(
         self, datalog_path: str, tune_path: str, definition_path: Optional[str] = None
@@ -46,9 +58,12 @@ class ROMIntegrationManager:
             )
 
             # Step 1: Parse XML definition if provided
+            resolved_definition_path = self._resolve_definition_path(
+                tune_path, definition_path
+            )
             table_definitions = None
-            if definition_path:
-                table_definitions = self._parse_xml_definition(definition_path)
+            if resolved_definition_path:
+                table_definitions = self._parse_xml_definition(resolved_definition_path)
                 logger.info(
                     f"Loaded {table_definitions['table_count']} table definitions"
                 )
@@ -111,7 +126,7 @@ class ROMIntegrationManager:
     ) -> Dict[str, Any]:
         """Parse ROM file with optional XML definitions"""
         try:
-            # Set table definitions if available
+            self.rom_parser.clear_table_definitions()
             if table_definitions:
                 self.rom_parser.set_table_definitions(table_definitions)
 
@@ -128,6 +143,53 @@ class ROMIntegrationManager:
         except Exception as e:
             logger.error(f"ROM parsing failed: {e}")
             raise ValueError(f"Failed to parse ROM file: {e}")
+
+    def _build_bundled_definition_map(self) -> Dict[str, str]:
+        base = Path(__file__).resolve().parent / "definitions" / "merpmod"
+        definitions = {"A8DK100F": base / "A8DK100F.xml"}
+        return {
+            rom_id: str(path)
+            for rom_id, path in definitions.items()
+            if path.exists() and path.is_file()
+        }
+
+    def _resolve_definition_path(
+        self, tune_path: str, definition_path: Optional[str]
+    ) -> Optional[str]:
+        if definition_path:
+            return definition_path
+        detected_rom_id = self._detect_known_rom_id(tune_path)
+        if not detected_rom_id:
+            return None
+        bundled_path = self.bundled_definition_map.get(detected_rom_id)
+        if bundled_path:
+            logger.info(
+                f"Using bundled definition for ROM ID {detected_rom_id}: {bundled_path}"
+            )
+            return bundled_path
+        return None
+
+    def _detect_known_rom_id(self, tune_path: str) -> Optional[str]:
+        if not self.bundled_definition_map:
+            return None
+
+        try:
+            with open(tune_path, "rb") as rom_file:
+                for offset in KNOWN_ROM_ID_OFFSETS:
+                    rom_file.seek(offset)
+                    chunk = rom_file.read(self.max_bundled_id_len)
+                    for rom_id, rom_id_bytes in self.known_bundled_id_bytes.items():
+                        if rom_id_bytes in chunk:
+                            return rom_id
+
+                rom_file.seek(0)
+                prefix = rom_file.read(ROM_ID_SEARCH_WINDOW_SIZE)
+                for rom_id, rom_id_bytes in self.known_bundled_id_bytes.items():
+                    if rom_id_bytes in prefix:
+                        return rom_id
+        except OSError as exc:
+            logger.warning(f"Failed to read ROM file for ID detection ({tune_path}): {exc}")
+        return None
 
     def _analyze_datalog(self, datalog_path: str) -> Dict[str, Any]:
         """Analyze datalog file and include raw data for AI suggestions"""
@@ -456,8 +518,9 @@ class ROMIntegrationManager:
     ) -> Dict[str, Any]:
         """Parse a ROM and return its tables without performing analysis."""
         table_definitions = None
-        if definition_path:
-            table_definitions = self._parse_xml_definition(definition_path)
+        resolved_definition_path = self._resolve_definition_path(tune_path, definition_path)
+        if resolved_definition_path:
+            table_definitions = self._parse_xml_definition(resolved_definition_path)
 
         rom_data = self._parse_rom_file(tune_path, table_definitions)
         return rom_data.get("tables", {})
@@ -469,13 +532,18 @@ class ROMIntegrationManager:
         try:
             tune_path = session_data["tune"]["file_path"]
             definition_path = session_data.get("definition", {}).get("file_path")
+            resolved_definition_path = self._resolve_definition_path(
+                tune_path, definition_path
+            )
 
             # Parse ROM if not cached
             cache_key = f"rom_{Path(tune_path).name}"
             if cache_key not in self.cache:
                 table_definitions = None
-                if definition_path:
-                    table_definitions = self._parse_xml_definition(definition_path)
+                if resolved_definition_path:
+                    table_definitions = self._parse_xml_definition(
+                        resolved_definition_path
+                    )
 
                 rom_data = self._parse_rom_file(tune_path, table_definitions)
                 self.cache[cache_key] = rom_data
